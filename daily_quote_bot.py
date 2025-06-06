@@ -2,6 +2,7 @@
 """
 Daily Quote Bot for GitHub Actions
 Fetches daily quotes from greatday.com and sends to Telegram
+Only sends when there's a new quote available
 """
 
 import requests
@@ -10,6 +11,8 @@ import os
 from datetime import datetime, date
 import logging
 import sys
+import hashlib
+import json
 
 # Setup logging
 logging.basicConfig(
@@ -25,6 +28,61 @@ class DailyQuoteBot:
         self.telegram_token = telegram_token
         self.chat_id = chat_id
         self.base_url = f"https://api.telegram.org/bot{telegram_token}"
+        self.quote_tracking_file = 'last_quote_data.json'
+
+    def get_quote_hash(self, quote_data):
+        """Generate a unique hash for the quote to detect changes"""
+        # Create hash based on title and first paragraph of content
+        quote_identifier = f"{quote_data['title']}|{quote_data['content'][:200]}"
+        return hashlib.md5(quote_identifier.encode()).hexdigest()
+
+    def load_last_quote_data(self):
+        """Load the last sent quote data"""
+        try:
+            if os.path.exists(self.quote_tracking_file):
+                with open(self.quote_tracking_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            logger.warning(f"Could not load last quote data: {e}")
+            return None
+
+    def save_quote_data(self, quote_data, quote_hash):
+        """Save the current quote data and hash"""
+        try:
+            data_to_save = {
+                'hash': quote_hash,
+                'date': quote_data['date'],
+                'title': quote_data['title'],
+                'sent_at': datetime.now().isoformat(),
+                'fetch_date': quote_data['fetch_date']
+            }
+            with open(self.quote_tracking_file, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, indent=2)
+            logger.info("Quote data saved successfully")
+        except Exception as e:
+            logger.error(f"Could not save quote data: {e}")
+
+    def is_new_quote(self, current_quote_data):
+        """Check if the current quote is different from the last sent quote"""
+        current_hash = self.get_quote_hash(current_quote_data)
+        last_data = self.load_last_quote_data()
+        
+        if not last_data:
+            logger.info("No previous quote data found - treating as new quote")
+            return True, current_hash
+        
+        last_hash = last_data.get('hash')
+        
+        if current_hash != last_hash:
+            logger.info(f"New quote detected! Hash changed from {last_hash[:8]}... to {current_hash[:8]}...")
+            logger.info(f"Previous: {last_data.get('title', 'Unknown')}")
+            logger.info(f"Current: {current_quote_data['title']}")
+            return True, current_hash
+        else:
+            logger.info(f"Same quote as before: {current_quote_data['title']}")
+            logger.info(f"Last sent: {last_data.get('sent_at', 'Unknown time')}")
+            return False, current_hash
 
     def fetch_daily_quote(self):
         """Fetch the daily motivational quote from greatday.com"""
@@ -194,12 +252,21 @@ class DailyQuoteBot:
             self.send_to_telegram(error_msg)
             return "Failed to fetch quote"
 
+        # Check if this is a new quote
+        is_new, current_hash = self.is_new_quote(quote_data)
+        
+        if not is_new:
+            logger.info("📋 No new quote available - skipping send")
+            return "No new quote - skipped"
+
         # Format and send message
         message = self.format_message(quote_data)
         
         if self.send_to_telegram(message):
-            logger.info("✅ Quote sent successfully!")
-            return "Quote sent successfully"
+            # Save quote data only after successful send
+            self.save_quote_data(quote_data, current_hash)
+            logger.info("✅ New quote sent successfully!")
+            return "New quote sent successfully"
         else:
             logger.error("❌ Failed to send quote")
             return "Failed to send quote"
