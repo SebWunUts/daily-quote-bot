@@ -227,3 +227,8 @@ def main():
 
     # Create and run bot
     bot = DailyQuoteBot(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    result = bot.run()
+    logger.info(f"Final result: {result}")
+
+if __name__ == "__main__":
+    main()
