@@ -1,10 +1,11 @@
 name: Daily Quote Bot
-
 on:
   schedule:
-    # Run daily at 9:00 AM UTC (adjust timezone as needed)
-    # This is 7:00 PM AEDT / 6:00 PM AEST (Australian time)
-    - cron: '0 9 * * *'
+    # Check multiple times per day
+    - cron: '0 9 * * *'   # 9:00 AM UTC (7:00 PM AEDT / 6:00 PM AEST)
+    - cron: '0 13 * * *'  # 1:00 PM UTC (11:00 PM AEDT / 10:00 PM AEST)
+    - cron: '0 17 * * *'  # 5:00 PM UTC (3:00 AM AEDT / 2:00 AM AEST next day)
+    - cron: '0 21 * * *'  # 9:00 PM UTC (7:00 AM AEDT / 6:00 AM AEST next day)
   workflow_dispatch: # Allows manual triggering for testing
 
 jobs:
@@ -31,10 +32,10 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        echo "Starting daily quote bot..."
+        echo "Starting daily quote bot check..."
         python daily_quote_bot.py
         echo "Bot execution completed."
-
+        
     - name: Show completion status
       if: always()
       run: |
