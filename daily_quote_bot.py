@@ -79,7 +79,7 @@ class DailyQuoteBot:
                     if line.startswith('Ralph Marston'):
                         author = line
                         break
-                    elif any(word in line.lower() for word in ['copyright', 'previous', 'permission', 'subscribe', 'email']):
+                    elif any(word in line.lower() for word in ['copyright', 'previous', 'permission', 'subscribe', 'email', 'greatday.com']):
                         break
                     elif line and len(line) > 10 and not line.startswith('http'):
                         content.append(line)
@@ -95,7 +95,7 @@ class DailyQuoteBot:
             quote_data = {
                 'date': date_str,
                 'title': title,
-                'content': '\n\n'.join(content[:3]),  # Limit to first 3 paragraphs
+                'content': '\n\n'.join(content),  # Include ALL content paragraphs
                 'author': author,
                 'fetch_date': str(date.today())
             }
@@ -227,8 +227,3 @@ def main():
 
     # Create and run bot
     bot = DailyQuoteBot(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    result = bot.run()
-    logger.info(f"Final result: {result}")
-
-if __name__ == "__main__":
-    main()
