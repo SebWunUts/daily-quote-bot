@@ -1,0 +1,41 @@
+name: Daily Quote Bot
+
+on:
+  schedule:
+    # Run daily at 9:00 AM UTC (adjust timezone as needed)
+    # This is 7:00 PM AEDT / 6:00 PM AEST (Australian time)
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allows manual triggering for testing
+
+jobs:
+  send-daily-quote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
+        
+    - name: Run daily quote bot
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        echo "Starting daily quote bot..."
+        python daily_quote_bot.py
+        echo "Bot execution completed."
+
+    - name: Show completion status
+      if: always()
+      run: |
+        echo "Workflow completed at $(date)"
