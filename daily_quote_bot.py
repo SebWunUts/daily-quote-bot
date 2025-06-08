@@ -63,27 +63,27 @@ class DailyQuoteBot:
         except Exception as e:
             logger.error(f"Could not save quote data: {e}")
 
-       def is_new_quote(self, current_quote_data):
-    """Check if we should send today's quote (only once per day)"""
-    current_hash = self.get_quote_hash(current_quote_data)
-    last_data = self.load_last_quote_data()
-    
-    # Get today's date
-    today = str(date.today())
-    
-    if not last_data:
-        logger.info("No previous quote data found - sending today's quote")
+    def is_new_quote(self, current_quote_data):
+        """Check if we should send today's quote (only once per day)"""
+        current_hash = self.get_quote_hash(current_quote_data)
+        last_data = self.load_last_quote_data()
+        
+        # Get today's date
+        today = str(date.today())
+        
+        if not last_data:
+            logger.info("No previous quote data found - sending today's quote")
+            return True, current_hash
+        
+        # Check if we already sent a quote today
+        last_sent_date = last_data.get('fetch_date')
+        if last_sent_date == today:
+            logger.info(f"Already sent a quote today ({today}) - skipping")
+            return False, current_hash
+        
+        # It's a new day, send the quote
+        logger.info(f"New day detected! Last sent: {last_sent_date}, Today: {today}")
         return True, current_hash
-    
-    # Check if we already sent a quote today
-    last_sent_date = last_data.get('fetch_date')
-    if last_sent_date == today:
-        logger.info(f"Already sent a quote today ({today}) - skipping")
-        return False, current_hash
-    
-    # It's a new day, send the quote
-    logger.info(f"New day detected! Last sent: {last_sent_date}, Today: {today}")
-    return True, current_hash
 
     def fetch_daily_quote(self):
         """Fetch the daily motivational quote from greatday.com"""
