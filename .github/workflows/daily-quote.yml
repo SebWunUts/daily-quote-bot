@@ -1,5 +1,4 @@
 name: Daily Quote Bot
-
 on:
   schedule:
     - cron: '0 9 * * *'
@@ -7,9 +6,6 @@ on:
     - cron: '0 17 * * *'
     - cron: '0 21 * * *'
   workflow_dispatch:
-
-permissions:
-  contents: write  # ✅ Required to push changes back to the repo
 
 jobs:
   send-daily-quote:
@@ -19,6 +15,12 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Download last quote data
+      uses: actions/download-artifact@v4
+      with:
+        name: quote-state
+        path: .
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -39,18 +41,9 @@ jobs:
         python daily_quote_bot.py
         echo "Bot execution completed."
 
-    - name: Set up Git for commit
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-
-    - name: Commit last quote hash
-      run: |
-        git add last_quote_data.json
-        git commit -m "Update last sent quote hash" || echo "No changes to commit"
-        git push origin main
-
-    - name: Show completion status
+    - name: Upload last quote data
       if: always()
-      run: |
-        echo "Workflow completed at $(date)"
+      uses: actions/upload-artifact@v4
+      with:
+        name: quote-state
+        path: last_quote_data.json
