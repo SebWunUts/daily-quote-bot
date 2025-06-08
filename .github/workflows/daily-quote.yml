@@ -2,16 +2,15 @@ name: Daily Quote Bot
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # 9:00 AM UTC
-    - cron: '0 13 * * *'  # 1:00 PM UTC
-    - cron: '0 17 * * *'  # 5:00 PM UTC
-    - cron: '0 21 * * *'  # 9:00 PM UTC
-  workflow_dispatch: # manual trigger
+    - cron: '0 9 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch:
 
 jobs:
   send-daily-quote:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
     - name: Checkout repository
@@ -24,33 +23,28 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    - name: Ensure default last_quote_data.json exists
+    - name: Create default state if missing
       run: |
-        echo '{}' > last_quote_data.json
+        if [ ! -f last_quote_data.json ]; then echo '{}' > last_quote_data.json; fi
 
-    - name: Try to download previous state
+    - name: Try to download last quote state
       uses: actions/download-artifact@v4
       with:
         name: quote-state
         path: .
-      continue-on-error: true  # allow it to fail silently on first run
+      continue-on-error: true
 
-    - name: Run Daily Quote Bot
+    - name: Run the bot
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         python daily_quote_bot.py
 
-    - name: Upload state file for next run
+    - name: Upload latest quote state
       uses: actions/upload-artifact@v4
       with:
         name: quote-state
         path: last_quote_data.json
-
-    - name: Show completion status
-      if: always()
-      run: echo "✅ Daily quote bot completed at $(date)"
