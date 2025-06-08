@@ -1,32 +1,35 @@
 name: Daily Quote Bot
+
 on:
   schedule:
-    # Check multiple times per day
-    - cron: '0 9 * * *'   # 9:00 AM UTC (7:00 PM AEDT / 6:00 PM AEST)
-    - cron: '0 13 * * *'  # 1:00 PM UTC (11:00 PM AEDT / 10:00 PM AEST)
-    - cron: '0 17 * * *'  # 5:00 PM UTC (3:00 AM AEDT / 2:00 AM AEST next day)
-    - cron: '0 21 * * *'  # 9:00 PM UTC (7:00 AM AEDT / 6:00 AM AEST next day)
-  workflow_dispatch: # Allows manual triggering for testing
+    - cron: '0 9 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # ✅ Required to push changes back to the repo
 
 jobs:
   send-daily-quote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
-        
+
     - name: Run daily quote bot
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -35,7 +38,18 @@ jobs:
         echo "Starting daily quote bot check..."
         python daily_quote_bot.py
         echo "Bot execution completed."
-        
+
+    - name: Set up Git for commit
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Commit last quote hash
+      run: |
+        git add last_quote_data.json
+        git commit -m "Update last sent quote hash" || echo "No changes to commit"
+        git push origin main
+
     - name: Show completion status
       if: always()
       run: |
