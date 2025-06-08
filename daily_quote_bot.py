@@ -13,6 +13,7 @@ import logging
 import sys
 import hashlib
 import json
+import time
 
 # Setup logging
 logging.basicConfig(
@@ -32,8 +33,8 @@ class DailyQuoteBot:
 
     def get_quote_hash(self, quote_data):
         """Generate a unique hash for the quote to detect changes"""
-        # Create hash based on title and first paragraph of content
-        quote_identifier = f"{quote_data['title']}|{quote_data['content'][:200]}"
+        # Create hash based on date, title and first 200 chars of content
+        quote_identifier = f"{quote_data['date']}|{quote_data['title']}|{quote_data['content'][:200]}"
         return hashlib.md5(quote_identifier.encode()).hexdigest()
 
     def load_last_quote_data(self):
@@ -41,7 +42,11 @@ class DailyQuoteBot:
         try:
             if os.path.exists(self.quote_tracking_file):
                 with open(self.quote_tracking_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Handle empty or malformed files
+                    if not data or not isinstance(data, dict):
+                        return None
+                    return data
             return None
         except Exception as e:
             logger.warning(f"Could not load last quote data: {e}")
@@ -55,35 +60,35 @@ class DailyQuoteBot:
                 'date': quote_data['date'],
                 'title': quote_data['title'],
                 'sent_at': datetime.now().isoformat(),
-                'fetch_date': quote_data['fetch_date']
+                'fetch_date': quote_data['fetch_date'],
+                'content_preview': quote_data['content'][:100] + "..." if len(quote_data['content']) > 100 else quote_data['content']
             }
             with open(self.quote_tracking_file, 'w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, indent=2)
-            logger.info("Quote data saved successfully")
+                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+            logger.info(f"Quote data saved successfully - Hash: {quote_hash[:8]}...")
         except Exception as e:
             logger.error(f"Could not save quote data: {e}")
 
     def is_new_quote(self, current_quote_data):
-        """Check if we should send today's quote (only once per day)"""
+        """Check if this is a new quote we haven't sent before"""
         current_hash = self.get_quote_hash(current_quote_data)
         last_data = self.load_last_quote_data()
         
-        # Get today's date
-        today = str(date.today())
+        logger.info(f"Current quote hash: {current_hash[:8]}...")
         
         if not last_data:
-            logger.info("No previous quote data found - sending today's quote")
+            logger.info("No previous quote data found - this is a new quote")
             return True, current_hash
         
-        # Check if we already sent a quote today
-        last_sent_date = last_data.get('fetch_date')
-        if last_sent_date == today:
-            logger.info(f"Already sent a quote today ({today}) - skipping")
-            return False, current_hash
+        last_hash = last_data.get('hash', '')
+        logger.info(f"Last quote hash: {last_hash[:8]}...")
         
-        # It's a new day, send the quote
-        logger.info(f"New day detected! Last sent: {last_sent_date}, Today: {today}")
-        return True, current_hash
+        if current_hash != last_hash:
+            logger.info("Quote content has changed - this is a new quote!")
+            return True, current_hash
+        else:
+            logger.info("Quote content is the same as last time - skipping")
+            return False, current_hash
 
     def fetch_daily_quote(self):
         """Fetch the daily motivational quote from greatday.com"""
@@ -91,9 +96,9 @@ class DailyQuoteBot:
             url = "https://www.greatday.com/"
             
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
@@ -101,16 +106,34 @@ class DailyQuoteBot:
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'none',
                 'Sec-Fetch-User': '?1',
-                'Cache-Control': 'max-age=0'
+                'Cache-Control': 'no-cache'
             }
 
             logger.info("Fetching quote from greatday.com...")
-            response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
-            response.raise_for_status()
+            
+            # Add retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+                    response.raise_for_status()
+                    break
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                    else:
+                        raise
             
             logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response size: {len(response.content)} bytes")
             
             soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Debug: Save first 1000 chars of content for debugging
+            content_preview = soup.get_text()[:1000]
+            logger.info(f"Content preview: {content_preview[:200]}...")
+            
             content_text = soup.get_text()
             lines = [line.strip() for line in content_text.split('\n') if line.strip()]
 
@@ -120,75 +143,94 @@ class DailyQuoteBot:
             content = []
             author = "Ralph Marston"
 
-            # Find date and title
+            # Find date and title with improved detection
             for i, line in enumerate(lines):
+                # Look for day names in the line
                 if any(day in line for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']):
                     date_str = line
-                    if i + 1 < len(lines):
-                        title = lines[i + 1]
+                    # Look for title in next few lines
+                    for j in range(i + 1, min(i + 4, len(lines))):
+                        potential_title = lines[j]
+                        # Title is usually short and not too long
+                        if (len(potential_title) > 5 and 
+                            len(potential_title) < 100 and 
+                            not any(skip_word in potential_title.lower() for skip_word in 
+                                   ['copyright', 'ralph marston', 'greatday', 'http', 'www'])):
+                            title = potential_title
+                            break
                     break
 
-            # Extract main content with better filtering
+            # Extract main content with improved filtering
             content_started = False
+            title_found = False
+            
             for line in lines:
-                if line == title and title:
+                # Start collecting content after we find the title
+                if line == title and title and not title_found:
                     content_started = True
+                    title_found = True
                     continue
                 elif content_started:
-                    # Stop when we hit the author line or footer content
-                    if line.startswith('Ralph Marston') or line == 'Ralph Marston':
-                        # Only set author if we haven't found it yet
-                        if author == "Ralph Marston":  # default value
+                    # Stop conditions
+                    if (line.startswith('Ralph Marston') or 
+                        line == 'Ralph Marston' or
+                        '— Ralph' in line):
+                        if author == "Ralph Marston":
                             author = line
                         break
-                    # Stop at common footer/navigation elements
                     elif any(word in line.lower() for word in [
                         'copyright', 'previous', 'permission', 'subscribe', 'email', 
                         'greatday.com', 'make a plan', 'weekly focus', 'archives',
-                        'home', 'contact', 'privacy', 'terms'
+                        'home', 'contact', 'privacy', 'terms', 'navigate'
                     ]):
-                        break
-                    # Stop if line looks like a title for next article (short, title-case)
-                    elif (len(line.split()) <= 4 and 
-                          line.istitle() and 
-                          not line.endswith('.') and 
-                          len(content) > 0):
                         break
                     # Include valid content lines
                     elif (line and 
-                          len(line) > 10 and 
+                          len(line) > 15 and 
                           not line.startswith('http') and
                           not line.startswith('—') and
-                          '©' not in line):
+                          '©' not in line and
+                          not line.isupper() and  # Skip navigation/header text
+                          len(line.split()) > 3):  # Ensure it's a proper sentence
                         content.append(line)
 
-            # Clean up content - remove any trailing author references
-            cleaned_content = []
-            for paragraph in content:
-                # Skip paragraphs that are just author names or short phrases
-                if (paragraph.strip() != 'Ralph Marston' and 
-                    not paragraph.strip().startswith('— Ralph') and
-                    len(paragraph.strip()) > 15):
-                    cleaned_content.append(paragraph)
+            # Fallback parsing if main method didn't work
+            if not date_str or not title or not content:
+                logger.warning("Primary parsing failed, trying fallback method...")
+                
+                # Try to find any meaningful content
+                all_text = ' '.join(lines)
+                
+                # Look for patterns that might be the quote
+                paragraphs = [p.strip() for p in all_text.split('.') if len(p.strip()) > 50]
+                
+                if paragraphs:
+                    content = [paragraphs[0] + '.']  # Take first substantial paragraph
+                
+                if not date_str:
+                    date_str = datetime.now().strftime("%A, %B %d, %Y")
+                if not title:
+                    title = "Daily Motivation"
 
-            # Fallback if no content found
-            if not date_str:
-                date_str = datetime.now().strftime("%A, %B %d, %Y")
-            if not title:
-                title = "Daily Motivation"
-            if not cleaned_content:
-                cleaned_content = ["Stay positive and keep moving forward. Every day is a new opportunity to grow and improve."]
+            # Final fallback
+            if not content:
+                logger.warning("Could not extract content, using fallback")
+                return self.get_fallback_quote()
 
             quote_data = {
                 'date': date_str,
                 'title': title,
-                'content': '\n\n'.join(cleaned_content),
+                'content': '\n\n'.join(content),
                 'author': author,
                 'fetch_date': str(date.today())
             }
 
-            logger.info(f"Successfully fetched quote: {title}")
-            logger.info(f"Content paragraphs: {len(cleaned_content)}")
+            logger.info(f"Successfully parsed quote:")
+            logger.info(f"  Date: {date_str}")
+            logger.info(f"  Title: {title}")
+            logger.info(f"  Content length: {len(quote_data['content'])} chars")
+            logger.info(f"  Content paragraphs: {len(content)}")
+            
             return quote_data
 
         except requests.exceptions.RequestException as e:
@@ -196,6 +238,8 @@ class DailyQuoteBot:
             return self.get_fallback_quote()
         except Exception as e:
             logger.error(f"Error fetching quote: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return self.get_fallback_quote()
 
     def get_fallback_quote(self):
@@ -203,17 +247,22 @@ class DailyQuoteBot:
         fallback_quotes = [
             {
                 'title': 'Persistence Pays',
-                'content': 'Success is not final, failure is not fatal: it is the courage to continue that counts. Keep pushing forward, even when the path seems difficult.',
+                'content': 'Success is not final, failure is not fatal: it is the courage to continue that counts. Keep pushing forward, even when the path seems difficult. Each challenge you overcome makes you stronger and more resilient.',
                 'author': 'Daily Motivator'
             },
             {
                 'title': 'New Beginnings',
-                'content': 'Every day is a fresh start. Yesterday\'s mistakes don\'t define today\'s possibilities. Embrace the opportunity to grow and improve.',
+                'content': 'Every day is a fresh start. Yesterday\'s mistakes don\'t define today\'s possibilities. Embrace the opportunity to grow and improve. Your potential is limitless when you approach each day with renewed energy.',
                 'author': 'Daily Motivator'
             },
             {
                 'title': 'Inner Strength',
-                'content': 'You are stronger than you think and more capable than you realize. Trust in your abilities and take confident steps toward your goals.',
+                'content': 'You are stronger than you think and more capable than you realize. Trust in your abilities and take confident steps toward your goals. The power to change your life lies within you.',
+                'author': 'Daily Motivator'
+            },
+            {
+                'title': 'Focus Forward',
+                'content': 'Focus on progress, not perfection. Every small step forward is a victory worth celebrating. Consistency in small actions leads to extraordinary results over time.',
                 'author': 'Daily Motivator'
             }
         ]
@@ -234,13 +283,19 @@ class DailyQuoteBot:
         try:
             url = f"{self.base_url}/sendMessage"
             
+            # Split message if too long
+            max_length = 4000
+            if len(message) > max_length:
+                message = message[:max_length-10] + "...\n\n[Truncated]"
+            
             data = {
                 'chat_id': str(self.chat_id),
-                'text': message[:4000],  # Telegram message limit
-                'parse_mode': 'HTML'  # Enable HTML formatting
+                'text': message,
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True
             }
 
-            logger.info(f"Sending message to Telegram (length: {len(message)})")
+            logger.info(f"Sending message to Telegram (length: {len(message)} chars)")
             response = requests.post(url, data=data, timeout=30)
             
             logger.info(f"Telegram response status: {response.status_code}")
@@ -273,6 +328,7 @@ class DailyQuoteBot:
     def run(self):
         """Main function to fetch and send daily quote"""
         logger.info("🚀 Starting daily quote bot...")
+        logger.info(f"Current time: {datetime.now().isoformat()}")
 
         # Fetch quote
         quote_data = self.fetch_daily_quote()
@@ -286,7 +342,7 @@ class DailyQuoteBot:
         is_new, current_hash = self.is_new_quote(quote_data)
         
         if not is_new:
-            logger.info("📋 No new quote available - skipping send")
+            logger.info("📋 Quote hasn't changed since last check - skipping send")
             return "No new quote - skipped"
 
         # Format and send message
