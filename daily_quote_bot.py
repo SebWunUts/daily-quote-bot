@@ -128,38 +128,67 @@ class DailyQuoteBot:
                         title = lines[i + 1]
                     break
 
-            # Extract main content
+            # Extract main content with better filtering
             content_started = False
             for line in lines:
                 if line == title and title:
                     content_started = True
                     continue
                 elif content_started:
-                    if line.startswith('Ralph Marston'):
-                        author = line
+                    # Stop when we hit the author line or footer content
+                    if line.startswith('Ralph Marston') or line == 'Ralph Marston':
+                        # Only set author if we haven't found it yet
+                        if author == "Ralph Marston":  # default value
+                            author = line
                         break
-                    elif any(word in line.lower() for word in ['copyright', 'previous', 'permission', 'subscribe', 'email', 'greatday.com']):
+                    # Stop at common footer/navigation elements
+                    elif any(word in line.lower() for word in [
+                        'copyright', 'previous', 'permission', 'subscribe', 'email', 
+                        'greatday.com', 'make a plan', 'weekly focus', 'archives',
+                        'home', 'contact', 'privacy', 'terms'
+                    ]):
                         break
-                    elif line and len(line) > 10 and not line.startswith('http'):
+                    # Stop if line looks like a title for next article (short, title-case)
+                    elif (len(line.split()) <= 4 and 
+                          line.istitle() and 
+                          not line.endswith('.') and 
+                          len(content) > 0):
+                        break
+                    # Include valid content lines
+                    elif (line and 
+                          len(line) > 10 and 
+                          not line.startswith('http') and
+                          not line.startswith('—') and
+                          '©' not in line):
                         content.append(line)
+
+            # Clean up content - remove any trailing author references
+            cleaned_content = []
+            for paragraph in content:
+                # Skip paragraphs that are just author names or short phrases
+                if (paragraph.strip() != 'Ralph Marston' and 
+                    not paragraph.strip().startswith('— Ralph') and
+                    len(paragraph.strip()) > 15):
+                    cleaned_content.append(paragraph)
 
             # Fallback if no content found
             if not date_str:
                 date_str = datetime.now().strftime("%A, %B %d, %Y")
             if not title:
                 title = "Daily Motivation"
-            if not content:
-                content = ["Stay positive and keep moving forward. Every day is a new opportunity to grow and improve."]
+            if not cleaned_content:
+                cleaned_content = ["Stay positive and keep moving forward. Every day is a new opportunity to grow and improve."]
 
             quote_data = {
                 'date': date_str,
                 'title': title,
-                'content': '\n\n'.join(content),  # Include ALL content paragraphs
+                'content': '\n\n'.join(cleaned_content),
                 'author': author,
                 'fetch_date': str(date.today())
             }
 
             logger.info(f"Successfully fetched quote: {title}")
+            logger.info(f"Content paragraphs: {len(cleaned_content)}")
             return quote_data
 
         except requests.exceptions.RequestException as e:
